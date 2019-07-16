@@ -5,9 +5,11 @@
 
 #define uint64 unsigned long long
 #define MAX 1'000'000'000ULL
-#define THREAD_NUM 16  // Use only 2^n threads. If not, it doesn't work well.
+#define THREAD_NUM 16
 
 using namespace std;
+
+bool is_write = false;
 
 string filename = "./prime.txt";
 uint64 count = 0, *cache_primes;
@@ -66,28 +68,35 @@ int main(int argc, char **argv)
     {
         uint64 p = cache_primes[i];
 
-        for (uint64 j = 0;; j++)
-        {
-            if (p * (6 * j + 5) > MAX) break;
+        int r = p % 6;  // For checking property of multiplication
 
-            //if (p * (6 * j + 5) % 6 == 1)  // 6k + 1 => 6(k - 1) + 7
+        /* (6n + 1)(6m + 1) = 6k + 1
+         * (6n + 5)(6m + 5) = 6k + 1
+         * (6n + 1)(6m + 5) = 6k + 5
+         */
+
+        if (r == 5)
+            for (uint64 j = 0;; j++)
+            {
+                if (p * (6 * j + 5) > MAX) break;
                 sieve[2 * (p * (6 * j + 5) / 6 - 1) + 1] = false;
-            
-            //if (p * (6 * j + 5) % 6 == 5)  // 6k + 5
-                sieve[2 * (p * (6 * j + 5) / 6)] = false;
-
-            if (p * (6 * j + 7) > MAX) break;
-
-            //if (p * (6 * j + 7) % 6 == 1)  // 6k + 1 => 6(k - 1) + 7
-                sieve[2 * (p * (6 * j + 7) / 6 - 1) + 1] = false;
-            
-            //if (p * (6 * j + 7) % 6 == 5)  // 6k + 5
+                if (p * (6 * j + 7) > MAX) break;
                 sieve[2 * (p * (6 * j + 7) / 6)] = false;
-        }
+            }
+        else  // r == 1
+            for (uint64 j = 0;; j++)
+            {
+                if (p * (6 * j + 5) > MAX) break;
+                sieve[2 * (p * (6 * j + 5) / 6)] = false;
+                if (p * (6 * j + 7) > MAX) break;
+                sieve[2 * (p * (6 * j + 7) / 6 - 1) + 1] = false;
+            }
     }
 
     end = omp_get_wtime();
     cout << "Finished Calculation: " << (end - start) * 1000 << "ms" << "\n\n";
+
+    if (!is_write) return 0;
 
     // save primes
     cout << "Enter Save\n";
