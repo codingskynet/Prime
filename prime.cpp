@@ -1,21 +1,19 @@
 #include <iostream>
 #include <fstream>
+#include <cstdio>
 #include <cmath>
 #include <omp.h>
 
 #define uint64 unsigned long long
-#define MAX 1'000'000'000ULL
+#define MAX_NUM 1'000'000'000'000ULL
+#define MAX_MEM       500'000'000ULL
 #define THREAD_NUM 16
 
 using namespace std;
 
-bool is_write = false;
-
-string filename = "./prime.txt";
+string filename = "./save/prime.txt";
 uint64 count = 0, *cache_primes;
-bool *sieve;
-uint64 sieve_size = MAX/3 + 3;
-
+bool **sieve;
 
 bool is_prime(uint64 n)
 {
@@ -30,26 +28,34 @@ bool is_prime(uint64 n)
     return true;
 }
 
+void init(int type)
+{
+    for (uint64 j = 0; j < MAX_MEM / 2; j++)    
+        sieve[type][j] = true;
+}
+
+void check(int type, uint64 p, uint64 now_idx)
+{
+    for (uint64 i = (now_idx + p - 1) / p / 2 * 2 + 1; p * i <= min(now_idx + MAX_MEM, MAX_NUM); i += 2)
+    {
+        sieve[type][(i * p - now_idx) / 2] = false;
+    }
+}
 
 int main(int argc, char **argv)
 {
     double start, end;
 
-    sieve = new bool[sieve_size];
-
-    // init sieve
-    for (uint64 i = 0; i < sieve_size; i++)
-    {
-        sieve[i] = true;
-    }
+    sieve = new bool*[2];
+    sieve[0] = new bool[MAX_MEM / 2];
+    sieve[1] = new bool[MAX_MEM / 2];
 
     // calculate some primes
-    uint64 size = (uint64)(sqrt(MAX) / log(sqrt(MAX)) * 1.1) + 1'000ULL;
-    cache_primes = new uint64[size];
+    cache_primes = new uint64[(uint64)(sqrt(MAX_NUM) / log(sqrt(MAX_NUM)) * 1.2) + 5'000ULL];
     
     cache_primes[count++] = 2;    
 
-    for (uint64 i = 3; i <= sqrt(MAX); i += 2)
+    for (uint64 i = 3; i <= sqrt(MAX_NUM); i += 2)
     {
         if (is_prime(i))
         {
@@ -57,74 +63,60 @@ int main(int argc, char **argv)
         }
     }
 
-    // calcuate using eratosthenes' sieve
-    cout << "Enter Calculation\n";
+    // calcuate using eratosthenes' sieve and save
+    cout << "Enter Calculation & Save\n";
     start = omp_get_wtime();
 
     omp_set_num_threads(THREAD_NUM);
     
-    #pragma omp parallel for schedule(dynamic)
-    for (uint64 i = 2; i < count; i++)
-    {
-        uint64 p = cache_primes[i];
-
-        int r = p % 6;  // For checking property of multiplication
-
-        /* (6n + 1)(6m + 1) = 6k + 1
-         * (6n + 5)(6m + 5) = 6k + 1
-         * (6n + 1)(6m + 5) = 6k + 5
-         */
-
-        if (r == 5)
-            for (uint64 j = 0;; j++)
-            {
-                if (p * (6 * j + 5) > MAX) break;
-                sieve[2 * (p * (6 * j + 5) / 6 - 1) + 1] = false;
-                if (p * (6 * j + 7) > MAX) break;
-                sieve[2 * (p * (6 * j + 7) / 6)] = false;
-            }
-        else  // r == 1
-            for (uint64 j = 0;; j++)
-            {
-                if (p * (6 * j + 5) > MAX) break;
-                sieve[2 * (p * (6 * j + 5) / 6)] = false;
-                if (p * (6 * j + 7) > MAX) break;
-                sieve[2 * (p * (6 * j + 7) / 6 - 1) + 1] = false;
-            }
-    }
-
-    end = omp_get_wtime();
-    cout << "Finished Calculation: " << (end - start) * 1000 << "ms" << "\n\n";
-
-    if (!is_write) return 0;
-
-    // save primes
-    cout << "Enter Save\n";
-    start = omp_get_wtime();
-
-    ofstream file(filename.data());
+    ofstream file(filename, ios::out);
     if (!file.is_open())
     {
         cout << "Error: Cannot write file." << "\n";
         return -1;
     }
 
-    file << 2 << "\n";
-    file << 3 << "\n";
-    
-    for (uint64 i = 0; 6 * i / 2 + 5 <= MAX; i += 2)
+    for (uint64 i = 0; i < count; i++)
     {
-        if (sieve[i])
-            file << to_string(6 * (i / 2) + 5) << "\n";
+        file << cache_primes[i] << "\n";
+    }
 
-        if (sieve[i + 1])
-            file << to_string(6 * (i / 2) + 7) << "\n";
+    #pragma omp parallel
+    {
+        #pragma omp single
+        {
+            for (int i = 0; i < (MAX_NUM + MAX_MEM - 1) / MAX_MEM; i++)
+            {
+                int type = i % 2;
+                uint64 now_idx = ((uint64)sqrt(MAX_NUM) + 1) / 2 * 2 + i * MAX_MEM;
+                init(type);
+
+                cout << "Calculation: [" << now_idx << ", " << min(now_idx + MAX_MEM, MAX_NUM) << "]\n";
+
+                for (uint64 j = 1; j < count; j += 5)
+                    #pragma omp task
+                    for (uint64 k = 0; k < min(5ULL, count - j); k++)
+                        check(type, cache_primes[j + k], now_idx);
+
+                #pragma omp taskwait
+
+                cout << "Calculation Clear!\n";
+
+                #pragma omp task
+                for (uint64 j = 0; j < min(MAX_MEM, (MAX_NUM - now_idx)) / 2; j++)
+                    if (sieve[type][j])
+                    {
+                        file << 2 * j + 1 + now_idx;
+                        file.put('\n');
+                    }
+            }
+        }
     }
 
     file.close();
 
     end = omp_get_wtime();
-    cout << "Finished Save: " << (end - start) * 1000 << "ms" << "\n\n";
+    cout << "Finished Calculation & Save: " << (end - start) * 1000 << "ms" << "\n\n";
 
     return 0;
 }
